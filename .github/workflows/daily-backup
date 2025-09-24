@@ -1,0 +1,70 @@
+name: Britive-Github Federated Access for AWS Keyless via OpenID Connect
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 8 * * *'  # Runs daily at 08:00 UTC
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  federated-aws-access:
+    runs-on: ubuntu-latest
+
+    env:
+      BRITIVE_TENANT: se-learn
+      BRITIVE_PROFILE_NAME: AWS Standalone/Widgeto Prod/S3-Access-App123
+      FED_PROVIDER: github-britive
+      AWS_REGION: us-east-2 
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install pybritive cli
+        run: |
+          pip install pybritive --quiet
+ 
+      - name: Configure Britive and AWS credential_process
+        run: |
+          mkdir -p ~/.aws
+          # Add profile alias
+          pybritive configure update profile-aliases default "$BRITIVE_PROFILE_NAME"
+          # Set AWS credential_process to use pybritive federation
+          cat <<EOF > ~/.aws/credentials
+          [default]
+          credential_process=pybritive checkout default -m awscredentialprocess -P $FED_PROVIDER
+          EOF
+
+          # Set default AWS region
+          aws configure set default.region "$AWS_REGION"
+
+      - name: Test AWS Access - List S3 Buckets
+        run: |
+          echo "Listing S3 buckets..."
+          aws s3 ls
+          echo "Checking ACME-Backup bucket..."
+          aws s3 ls s3://ACME-Backup/
+
+      - name: Create Daily Backup File
+        run: |
+          # Generate current date in YYYY-MM-DD format
+          BACKUP_DATE=$(date +%Y-%m-%d)
+          BACKUP_FILENAME="Backup-${BACKUP_DATE}.bak"
+          
+          echo "Creating backup file: $BACKUP_FILENAME"
+          
+          # Create temporary file with backup content
+          echo "Daily Backup $BACKUP_DATE" > /tmp/$BACKUP_FILENAME
+          
+          # Upload to S3 bucket
+          aws s3 cp /tmp/$BACKUP_FILENAME s3://ACME-Backup/$BACKUP_FILENAME
+          
+          echo "Successfully created backup file: s3://ACME-Backup/$BACKUP_FILENAME"
+          
+          # Optional: List files in bucket to confirm upload
+          echo "Current files in ACME-Backup bucket:"
+          aws s3 ls s3://ACME-Backup/
